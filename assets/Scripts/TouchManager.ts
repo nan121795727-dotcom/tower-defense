@@ -22,7 +22,13 @@ export class TouchManager extends Component {
     public static money: number = GameConfig.INITIAL_MONEY;
     public static baseHealth: number = GameConfig.INITIAL_HEALTH;
     public static isGameOver: boolean = false;
+    public static isVictory: boolean = false;  // 是否胜利
     public static pendingTowerData: TowerData | null = null;
+    
+    // 全局统计数据
+    public static totalDamage: number = 0;      // 总伤害
+    public static totalGoldEarned: number = 0;  // 赚取的总金币
+    public static gameStartTime: number = 0;    // 游戏开始时间
     
     private draggingTower: Node | null = null; 
     private originalTilePos: Vec3 = v3(); 

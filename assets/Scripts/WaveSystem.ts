@@ -118,6 +118,9 @@ export class WaveSystem extends Component {
         this.prepareTimer = GameConfig.PREPARE_TIME;
         this.currentWave = 0;
         
+        // 记录游戏开始时间（用于胜利结算）
+        TouchManager.gameStartTime = Date.now();
+        
         // 更新UI（通过UIController或直接更新TopBar）
         this.updateWaveLabel();
         
@@ -227,15 +230,17 @@ export class WaveSystem extends Component {
             } else if (isElite) {
                 // 精英波：8个精英怪
                 enemyCount = 8;
-                spawnInterval = 1.0;
+                spawnInterval = 1.2;  // 精英怪间隔稍大
                 enemyType = EnemyType.ELITE;
             } else {
                 // 普通波：固定数量，便于玩家学习
                 enemyCount = this.getEnemyCountForWave(wave);
-                spawnInterval = GameConfig.ENEMY_SPAWN_INTERVAL;
                 
                 // 获取该波次的敌人类型
                 enemyType = this.getEnemyTypeForWave(wave);
+                
+                // 根据怪物移速动态计算生成间隔（避免慢速怪物重叠）
+                spawnInterval = this.calculateSpawnInterval(enemyType);
             }
 
             this.waveConfigs.push({
@@ -270,43 +275,85 @@ export class WaveSystem extends Component {
             default: return "未知";
         }
     }
+    
+    /**
+     * 根据怪物类型计算生成间隔
+     * 移速越慢的怪物，生成间隔越大，避免重叠
+     */
+    private calculateSpawnInterval(enemyType: EnemyType): number {
+        let speed: number;
+        switch (enemyType) {
+            case EnemyType.FAST:
+                speed = GameConfig.FAST_ENEMY_SPEED;
+                break;
+            case EnemyType.TANK:
+                speed = GameConfig.TANK_ENEMY_SPEED;
+                break;
+            case EnemyType.ELITE:
+                speed = GameConfig.ELITE_ENEMY_SPEED;
+                break;
+            case EnemyType.BOSS:
+                speed = GameConfig.BOSS_ENEMY_SPEED;
+                break;
+            default:
+                speed = GameConfig.NORMAL_ENEMY_SPEED;
+                break;
+        }
+        
+        // 公式：基础间隔 × (基准速度 / 实际速度)
+        // 慢速怪物间隔更大，快速怪物间隔更小
+        const baseInterval = GameConfig.ENEMY_SPAWN_INTERVAL;
+        const baseSpeed = GameConfig.SPAWN_INTERVAL_BASE_SPEED;
+        let interval = baseInterval * (baseSpeed / speed);
+        
+        // 限制在合理范围内
+        interval = Math.max(GameConfig.SPAWN_INTERVAL_MIN, Math.min(GameConfig.SPAWN_INTERVAL_MAX, interval));
+        
+        return interval;
+    }
 
     /**
-     * 根据波次获取固定的怪物数量（30-45之间）
-     * 固定数量便于玩家学习和制定策略
+     * 根据波次获取固定的怪物数量
+     * 
+     * 设计理念：
+     * - 1-10波：学习期，数量适中，主要学习位置摆放
+     * - 11-20波：决策期，数量增加，需要决定合成时机
+     * - 21-30波：养成期，数量较多，考验整体阵容
      */
     private getEnemyCountForWave(wave: number): number {
-        // 波次 -> 怪物数量 映射表（30-45之间变化）
         const waveCountMap: { [key: number]: number } = {
-            1: 30,   // 新手期，较少
-            2: 30,
-            3: 32,
-            4: 35,   // 快速怪，稍多
-            5: 35,
-            6: 32,   // 喘息
+            // === 1-10波：学习期 ===
+            1: 25,   // 新手引导，很少
+            2: 28,
+            3: 30,
+            4: 30,
+            5: 32,
+            6: 30,   // 快速怪初见，数量不多
             7: 32,
-            8: 38,   // 坦克怪，需要更多时间击杀
-            9: 38,
-            10: 36,  // 快速怪
-            11: 34,
-            12: 34,
-            13: 40,  // 坦克怪
-            14: 40,
+            8: 28,   // 坦克怪初见，数量少但血厚
+            9: 32,
+            10: 35,
+            // === 11-20波：决策期 ===
+            11: 35,
+            12: 36,
+            13: 38,
+            14: 35,
             // 15波是精英波
             16: 38,
-            17: 35,
-            18: 35,
-            19: 42,  // 高压期开始
+            17: 40,
+            18: 38,
+            19: 42,
             20: 40,
-            21: 40,
-            22: 42,
-            23: 44,
-            24: 45,  // 最高压
+            // === 21-30波：养成期 ===
+            21: 42,
+            22: 44,
+            23: 45,
+            24: 45,
             // 25波是精英波
-            26: 42,
-            27: 44,
+            26: 45,
+            27: 45,
             28: 45,
-            29: 35,  // Boss前喘息
+            29: 40,  // Boss前喘息
             // 30波是Boss波
         };
         
@@ -314,43 +361,51 @@ export class WaveSystem extends Component {
     }
 
     /**
-     * 根据波次获取敌人类型（每波只返回一种类型）
-     * 重要：同一波次内所有敌人类型和属性完全一致！
-     * 不同波次之间可以更换怪物类型。
+     * 根据波次获取敌人类型
+     * 
+     * 设计理念：
+     * - 1-5波：纯普通怪，让玩家熟悉基础玩法
+     * - 6波：快速怪初见（认知阶段，血量低）
+     * - 8波：坦克怪初见（认知阶段，数量少）
+     * - 10波后：开始混合出现，考验应对能力
+     * - 20波后：高压期，各种怪物轮番上阵
      */
     private getEnemyTypeForWave(wave: number): EnemyType {
-        // 波次 -> 怪物类型 映射表
         const waveTypeMap: { [key: number]: EnemyType } = {
+            // === 1-5波：纯普通怪，学习基础 ===
             1: EnemyType.NORMAL,
             2: EnemyType.NORMAL,
             3: EnemyType.NORMAL,
-            4: EnemyType.FAST,
-            5: EnemyType.FAST,
-            6: EnemyType.NORMAL,
-            7: EnemyType.NORMAL,
-            8: EnemyType.TANK,
-            9: EnemyType.TANK,
-            10: EnemyType.FAST,
+            4: EnemyType.NORMAL,
+            5: EnemyType.NORMAL,
+            // === 6-10波：新怪物认知期 ===
+            6: EnemyType.FAST,    // 快速怪初见！提醒玩家准备减速塔
+            7: EnemyType.NORMAL,  // 喘息
+            8: EnemyType.TANK,    // 坦克怪初见！提醒玩家需要高伤害
+            9: EnemyType.NORMAL,  // 喘息
+            10: EnemyType.FAST,   // 快速怪再次出现
+            // === 11-20波：决策期，混合出现 ===
             11: EnemyType.NORMAL,
-            12: EnemyType.NORMAL,
-            13: EnemyType.TANK,
-            14: EnemyType.TANK,
-            // 15波是精英波，在initWaveConfigs中单独处理
-            16: EnemyType.FAST,
-            17: EnemyType.NORMAL,
+            12: EnemyType.TANK,
+            13: EnemyType.FAST,
+            14: EnemyType.NORMAL,
+            // 15波是精英波
+            16: EnemyType.TANK,
+            17: EnemyType.FAST,
             18: EnemyType.NORMAL,
             19: EnemyType.TANK,
             20: EnemyType.FAST,
-            21: EnemyType.FAST,
-            22: EnemyType.TANK,
+            // === 21-30波：养成期，高压 ===
+            21: EnemyType.TANK,
+            22: EnemyType.FAST,
             23: EnemyType.TANK,
-            24: EnemyType.TANK,
-            // 25波是精英波，在initWaveConfigs中单独处理
-            26: EnemyType.FAST,
-            27: EnemyType.TANK,
+            24: EnemyType.FAST,
+            // 25波是精英波
+            26: EnemyType.TANK,
+            27: EnemyType.FAST,
             28: EnemyType.TANK,
-            29: EnemyType.NORMAL,
-            // 30波是Boss波，在initWaveConfigs中单独处理
+            29: EnemyType.NORMAL,  // Boss前喘息
+            // 30波是Boss波
         };
         
         return waveTypeMap[wave] || EnemyType.NORMAL;

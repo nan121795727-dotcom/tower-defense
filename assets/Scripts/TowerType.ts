@@ -37,6 +37,21 @@ export enum SkillType {
 Enum(SkillType);
 
 /**
+ * 满级特色强化类型
+ * 每个塔在满级时有独特的特征放大效果
+ * 注意：不包含射程修改，避免玩家认知冲突
+ */
+export enum MaxLevelBonus {
+    NONE = 0,              // 无特殊效果（纯数值提升）
+    ATTACK_SPEED = 1,      // 攻速大幅提升
+    DAMAGE = 2,            // 伤害大幅提升
+    SLOW_RANGE = 3,        // 减速范围扩大
+    SPLASH_RANGE = 4,      // 溅射范围扩大
+    CHAIN_COUNT = 5        // 连锁数量增加
+}
+Enum(MaxLevelBonus);
+
+/**
  * 防御塔数据配置
  */
 export interface TowerData {
@@ -53,6 +68,9 @@ export interface TowerData {
     skillCooldown?: number;         // 技能冷却时间（可选）
     description: string;            // 描述
     spriteTexture?: string;         // 贴图资源名称（不含后缀）
+    // === 满级特色强化 ===
+    maxLevelBonus: MaxLevelBonus;  // 满级特殊效果类型
+    maxLevelBonusValue: number;    // 满级特殊效果数值
 }
 
 // 攻击范围常量（以地块为单位）
@@ -90,110 +108,147 @@ const RANGE_3 = TILE * 3.5;  // 3格射程：覆盖相邻3格
  * - 闪电塔：远程（3格）、中速攻击、中伤害+连锁 → 多目标输出
  */
 /**
- * 防御塔价格设计（初始金币120）：
- * - 便宜塔(20-30金)：可买4-6个，数量优势但单体弱
- * - 中等塔(50-60金)：可买2个，平衡选择
- * - 贵塔(100-120金)：只能买1个，单体强但前期压力大
+ * 防御塔价格设计（初始金币100）：
+ * 
+ * 核心设计理念：
+ * - 开局最多只能买3个塔（紧张的资源选择）
+ * - 如果运气好抽到同名塔，可以合成1个2级塔（惊喜感）
+ * - 绿色/蓝色塔需要攒钱，是中后期目标
+ * 
+ * 白色塔(35金)：100金 ÷ 35 = 2.8，最多买2个，剩30金
+ * 如果混搭便宜的射手：2×35 + 30 = 100金，刚好3个
  * 
  * 策略选择示例：
- * A) 1个闪电塔(120金) = 0金剩余，等第一波收入
- * B) 1个冰法(60金) + 1个射手(25金) = 35金剩余
- * C) 4个射手(25×4=100金) = 20金剩余
- * D) 1个小炮(50金) + 存70金，第一波中途再买
+ * A) 3个射手(30×3=90金) = 10金剩余，纯铺量
+ * B) 2个法师(35×2=70金) + 存30金，等第一波收入
+ * C) 1个战士(40金) + 2个射手(60金) = 0金，混搭策略
+ * D) 存钱策略：1个塔 + 等第一波收入买绿色塔
+ * 
+ * 惊喜时刻：
+ * - 抽到2个同名塔 → 合成2级！（概率约1/6）
+ * - 抽到3个同名塔 → 2级+进度！（概率极低，约1/36）
  */
 export class TowerConfig {
     static readonly TOWERS: TowerData[] = [
         // ========== 白色品质（3个）- 便宜但基础 ==========
+        // 设计理念：100金最多买3个塔，需要精打细算
+        // 射手最便宜(30金)，其他白色塔(35金)
+        // 100 ÷ 30 = 3.3 → 最多3个射手(90金)
+        // 100 ÷ 35 = 2.8 → 最多2个法师/战士(70金)
+        // 混搭：2×30 + 35 = 95金，或 30 + 35×2 = 100金
         {
             id: "tower_archer",
             name: "射手",
             rarity: TowerRarity.WHITE,
             category: TowerCategory.PHYSICAL,
-            baseCost: 25,           // 便宜！可以多买
-            baseDamage: 6,          // 低伤害，DPS=10
+            baseCost: 30,           // 最便宜，铺量首选
+            baseDamage: 5,          // 低伤害，DPS≈8.3
             baseAttackInterval: 0.6, // 快速攻击
-            baseRange: RANGE_3,      // 远程（3格）
+            baseRange: RANGE_3,      // 远程（3格）- 核心优势
             skillType: SkillType.NONE,
             skillValue: 0,
             description: "远程物理",
-            spriteTexture: "tower_gj"
+            spriteTexture: "tower_gj",
+            // 满级特色：攻速再提升50%，变成超高频射手
+            maxLevelBonus: MaxLevelBonus.ATTACK_SPEED,
+            maxLevelBonusValue: 0.5  // 攻击间隔再减少50%
         },
         {
             id: "tower_mage",
             name: "法师",
             rarity: TowerRarity.WHITE,
             category: TowerCategory.MAGIC,
-            baseCost: 30,           // 便宜
-            baseDamage: 8,          // 中伤害，DPS=8
+            baseCost: 35,           // 稍贵，但DPS更高
+            baseDamage: 10,         // 中伤害，DPS=10
             baseAttackInterval: 1.0, // 中速攻击
             baseRange: RANGE_2,      // 中程（2格）
             skillType: SkillType.NONE,
             skillValue: 0,
             description: "远程魔法",
-            spriteTexture: "tower_fs"
+            spriteTexture: "tower_fs",
+            // 满级特色：伤害大幅提升，变成高爆发法师
+            maxLevelBonus: MaxLevelBonus.DAMAGE,
+            maxLevelBonusValue: 0.8  // 伤害额外+80%
         },
         {
             id: "tower_guard",
             name: "战士",
             rarity: TowerRarity.WHITE,
             category: TowerCategory.PHYSICAL,
-            baseCost: 35,           // 稍贵一点
-            baseDamage: 15,         // 高伤害，DPS=10
+            baseCost: 40,           // 最贵的白色塔
+            baseDamage: 18,         // 高伤害，DPS=12
             baseAttackInterval: 1.5, // 慢速攻击
-            baseRange: RANGE_1,      // 近程（1格）
+            baseRange: RANGE_1,      // 近程（1格）- 需要好位置
             skillType: SkillType.NONE,
             skillValue: 0,
             description: "高伤害",
-            spriteTexture: "tower_sw"
+            spriteTexture: "tower_sw",
+            // 满级特色：伤害大幅提升，变成单体爆发王
+            maxLevelBonus: MaxLevelBonus.DAMAGE,
+            maxLevelBonusValue: 1.0  // 伤害额外+100%（翻倍）
         },
         
         // ========== 绿色品质（2个）- 中等价格有技能 ==========
+        // 设计理念：开局买不起，需要第1-2波收入后购买
+        // 第1波约30只怪 × 1金 = 30金收入
+        // 开局剩10金 + 30金 = 40金，还是买不起绿色塔
+        // 需要更精细的经济规划
         {
             id: "tower_cannon",
             name: "小炮",
             rarity: TowerRarity.GREEN,
             category: TowerCategory.AOE,
-            baseCost: 50,           // 中等价格
-            baseDamage: 18,         // 高伤害+溅射
+            baseCost: 60,           // 需要攒钱
+            baseDamage: 20,         // 高伤害+溅射
             baseAttackInterval: 2.0, // 极慢攻击
-            baseRange: RANGE_1,      // 近程（1格）
+            baseRange: RANGE_2,      // 中程（2格）- 符合"炮"的射程直觉
             skillType: SkillType.SPLASH,
-            skillValue: 0.6,        // 溅射60%伤害
+            skillValue: 0.5,        // 溅射50%伤害
             skillCooldown: 0,
             description: "范围伤害",
-            spriteTexture: "tower_hp"
+            spriteTexture: "tower_hp",
+            // 满级特色：溅射范围大幅扩大，变成真正的AOE炮台
+            maxLevelBonus: MaxLevelBonus.SPLASH_RANGE,
+            maxLevelBonusValue: 0.8  // 溅射范围+80%
         },
         {
             id: "tower_ice",
             name: "冰法",
             rarity: TowerRarity.GREEN,
             category: TowerCategory.SUPPORT,
-            baseCost: 60,           // 中等价格
-            baseDamage: 4,          // 低伤害但有减速
-            baseAttackInterval: 0.5, // 极快攻击
+            baseCost: 65,           // 控制型，稍贵
+            baseDamage: 8,          // 低伤害（主要靠减速）
+            baseAttackInterval: 2.0, // 慢速攻击
             baseRange: RANGE_2,      // 中程（2格）
             skillType: SkillType.SLOW,
-            skillValue: 0.4,        // 减速40%
+            skillValue: 0.25,       // 基础减速25%（升级后增强）
             skillCooldown: 0,
-            description: "减速",
-            spriteTexture: "tower_hb"
+            description: "范围减速",
+            spriteTexture: "tower_hb",
+            // 满级特色：减速效果大幅增强（25%→50%）+ 范围扩大
+            maxLevelBonus: MaxLevelBonus.SLOW_RANGE,
+            maxLevelBonusValue: 0.6  // 减速范围+60%
         },
         
         // ========== 蓝色品质（1个）- 贵但强力 ==========
+        // 设计理念：中期目标，需要3-5波收入积累
         {
             id: "tower_lightning",
             name: "闪电塔",
             rarity: TowerRarity.BLUE,
             category: TowerCategory.MAGIC,
-            baseCost: 120,          // 很贵！初始金币刚好够买1个
-            baseDamage: 12,         // 中伤害+连锁
+            baseCost: 120,          // 需要积累几波收入
+            baseDamage: 15,         // 中伤害+连锁
             baseAttackInterval: 1.0, // 中速攻击
             baseRange: RANGE_3,      // 远程（3格）
             skillType: SkillType.CHAIN,
-            skillValue: 4,          // 连锁4个敌人
+            skillValue: 3,          // 连锁3个敌人
             skillCooldown: 2.0,
             description: "连锁攻击",
-            spriteTexture: "tower_ld"
+            spriteTexture: "tower_ld",
+            // 满级特色：连锁数量翻倍，变成群体清场利器
+            maxLevelBonus: MaxLevelBonus.CHAIN_COUNT,
+            maxLevelBonusValue: 3    // 连锁数量+3（共6个）
         }
     ];
 

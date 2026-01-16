@@ -515,14 +515,18 @@ export class DragDropSystem extends Component {
             
             // 检查是否是 LV1 的塔（只有 LV1 才能拖拽合成）
             const towerScript = existingTower.getComponent(Tower);
+            console.log(`[拖拽检测] 点击了防御塔: ${existingTower.name}, 等级=${towerScript?.level}, ID=${towerScript?.towerId}`);
+            
             if (towerScript && towerScript.level === 1) {
-                console.log(`开始拖拽已放置的防御塔: ${existingTower.name}, 位置: (${worldPos.x.toFixed(1)}, ${worldPos.y.toFixed(1)})`);
+                console.log(`[拖拽检测] LV1塔，允许拖拽合成`);
                 (this as any).draggingPlacedTower = existingTower;
                 (this as any).originalTowerPos = existingTower.getPosition().clone();
                 existingTower.setSiblingIndex(999);
                 
                 // 显示攻击范围圈
                 this.showTowerRange(existingTower);
+            } else {
+                console.log(`[拖拽检测] 非LV1塔(等级=${towerScript?.level})，不允许拖拽`);
             }
             return;
         }
@@ -535,8 +539,10 @@ export class DragDropSystem extends Component {
         // 游戏结束时不处理
         if (TouchManager.isGameOver) return;
         
-        // 如果正在长按检测，移动则取消长按
-        if (this.isLongPressing) {
+        // 如果正在长按检测，小幅移动不取消（允许手指抖动）
+        // 只有当没有正在拖拽的塔时才取消长按
+        if (this.isLongPressing && !this.draggingTower && !(this as any).draggingPlacedTower) {
+            // 长按检测中但还没开始拖拽，取消长按
             this.isLongPressing = false;
             this.longPressTarget = null;
         }
@@ -986,16 +992,9 @@ export class DragDropSystem extends Component {
         const TOWER_Y_OFFSET = -30 + 50;  // = +20，从地块中心往上偏移
         tower.setPosition(v3(pos.x, pos.y + TOWER_Y_OFFSET, pos.z));
         
-        // 确保防御塔在地块之上：找到GridMap的索引，防御塔放在GridMap之后
-        const gridMap = find("Canvas/GridMap");
-        if (gridMap && gridMap.parent) {
-            const gridMapIndex = gridMap.getSiblingIndex();
-            // 防御塔应该在地块之后，但不要太高（避免遮挡UI）
-            tower.setSiblingIndex(Math.min(gridMapIndex + 1, 100));
-        } else {
-            // 如果没有GridMap，设置为一个合理的值（确保在地块之上）
-            tower.setSiblingIndex(50);
-        }
+        // 根据Y坐标设置正确的层级
+        // Y坐标越小（越靠下）的塔，显示在越上层
+        this.restoreTowerSiblingIndex(tower);
         
         // 初始化防御塔
         const towerScript = tower.getComponent(Tower);
@@ -1194,20 +1193,22 @@ export class DragDropSystem extends Component {
     }
 
     /**
-     * 恢复防御塔的层级（确保在地块之上）
+     * 恢复防御塔的层级（根据Y坐标计算正确的层级）
+     * Y坐标越小（越靠下）的塔，显示在越上层
      */
     private restoreTowerSiblingIndex(tower: Node) {
         if (!tower || !tower.isValid) return;
         
-        const gridMap = find("Canvas/GridMap");
-        if (gridMap && gridMap.parent) {
-            const gridMapIndex = gridMap.getSiblingIndex();
-            // 防御塔应该在地块之后，但不要太高（避免遮挡UI）
-            tower.setSiblingIndex(Math.min(gridMapIndex + 1, 100));
-        } else {
-            // 如果没有GridMap，设置为一个合理的值（确保在地块之上）
-            tower.setSiblingIndex(50);
-        }
+        // 根据Y坐标计算层级
+        // Y坐标范围约 -400 到 400
+        // 映射到层级 10-89
+        // Y=-400（最下方）→ 层级89（最高，显示在最前面）
+        // Y=400（最上方）→ 层级10（最低，显示在最后面）
+        const yPos = tower.position.y;
+        const zIndex = Math.floor(89 - (yPos + 400) * 79 / 800);
+        const clampedIndex = Math.max(10, Math.min(90, zIndex));
+        
+        tower.setSiblingIndex(clampedIndex);
     }
 
     /**

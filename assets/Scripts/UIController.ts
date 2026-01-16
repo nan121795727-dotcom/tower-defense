@@ -158,10 +158,33 @@ export class UIController extends Component {
             }
         }
 
-        // 判断游戏是否结束，显示重置按钮
+        // 判断游戏是否失败
         if (TouchManager.baseHealth <= 0 && !TouchManager.isGameOver) {
             TouchManager.isGameOver = true;
             this.showResetMenu();
+        }
+        
+        // 判断游戏是否胜利（第30波Boss被击杀）
+        if (!TouchManager.isGameOver && !TouchManager.isVictory && this.waveSystem) {
+            const currentWave = this.waveSystem.getCurrentWave();
+            const totalWaves = 30;
+            
+            // 如果是第30波，且没有敌人存活，且不在生成阶段
+            if (currentWave >= totalWaves) {
+                const canvas = find("Canvas");
+                if (canvas) {
+                    // 检查是否还有敌人
+                    const enemies = canvas.children.filter(n => n.name === "Enemy" && n.isValid);
+                    // 检查是否还有待生成的敌人
+                    const enemiesLeftToSpawn = (this.waveSystem as any).enemiesLeftToSpawn || 0;
+                    
+                    if (enemies.length === 0 && enemiesLeftToSpawn <= 0) {
+                        TouchManager.isGameOver = true;
+                        TouchManager.isVictory = true;
+                        this.showVictoryMenu();
+                    }
+                }
+            }
         }
     }
 
@@ -186,6 +209,92 @@ export class UIController extends Component {
             console.warn("GameOverPanel和resetButton都未找到");
         }
     }
+    
+    /**
+     * 显示胜利结算界面
+     */
+    showVictoryMenu() {
+        const victoryPanel = find("Canvas/VictoryPanel");
+        if (victoryPanel) {
+            victoryPanel.active = true;
+            victoryPanel.setSiblingIndex(99999);
+            console.log("显示胜利结算面板");
+            
+            // 更新统计数据
+            this.updateVictoryStats(victoryPanel);
+            
+            // 隐藏旧的重置按钮（如果存在）
+            if (this.resetButton) {
+                this.resetButton.active = false;
+            }
+        } else {
+            console.warn("VictoryPanel未找到");
+        }
+    }
+    
+    /**
+     * 更新胜利界面的统计数据
+     */
+    private updateVictoryStats(victoryPanel: Node) {
+        const banner = victoryPanel.getChildByName("Banner");
+        if (!banner) return;
+        
+        const statsArea = banner.getChildByName("StatsArea");
+        if (!statsArea) return;
+        
+        // 计算通关用时
+        const gameTime = TouchManager.gameStartTime > 0 
+            ? (Date.now() - TouchManager.gameStartTime) / 1000 
+            : 0;
+        const minutes = Math.floor(gameTime / 60);
+        const seconds = Math.floor(gameTime % 60);
+        const timeStr = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        
+        // 格式化总伤害
+        const damageStr = this.formatNumber(TouchManager.totalDamage);
+        
+        // 更新显示
+        const timeRow = statsArea.getChildByName("TimeRow");
+        if (timeRow) {
+            const valueNode = timeRow.getChildByName("Value");
+            if (valueNode) {
+                const label = valueNode.getComponent(Label);
+                if (label) label.string = timeStr;
+            }
+        }
+        
+        const goldRow = statsArea.getChildByName("GoldRow");
+        if (goldRow) {
+            const valueNode = goldRow.getChildByName("Value");
+            if (valueNode) {
+                const label = valueNode.getComponent(Label);
+                if (label) label.string = `${TouchManager.totalGoldEarned}`;
+            }
+        }
+        
+        const damageRow = statsArea.getChildByName("DamageRow");
+        if (damageRow) {
+            const valueNode = damageRow.getChildByName("Value");
+            if (valueNode) {
+                const label = valueNode.getComponent(Label);
+                if (label) label.string = damageStr;
+            }
+        }
+    }
+    
+    /**
+     * 格式化数字（K/M/B）
+     */
+    private formatNumber(num: number): string {
+        if (num >= 1000000000) {
+            return (num / 1000000000).toFixed(1) + 'B';
+        } else if (num >= 1000000) {
+            return (num / 1000000).toFixed(1) + 'M';
+        } else if (num >= 1000) {
+            return (num / 1000).toFixed(1) + 'K';
+        }
+        return num.toString();
+    }
 
     // 绑定给 ResetButton 的点击事件
     public onResetButtonClick() {
@@ -198,9 +307,17 @@ export class UIController extends Component {
         TouchManager.money = GameConfig.INITIAL_MONEY;
         TouchManager.baseHealth = GameConfig.INITIAL_HEALTH;
         TouchManager.isGameOver = false;
+        TouchManager.isVictory = false;
+        TouchManager.totalDamage = 0;
+        TouchManager.totalGoldEarned = 0;
+        TouchManager.gameStartTime = Date.now();  // 重新记录开始时间
         
-        // 隐藏游戏结束面板
+        // 隐藏游戏结束面板和胜利面板
         const gameOverPanel = find("Canvas/GameOverPanel");
+        const victoryPanel = find("Canvas/VictoryPanel");
+        if (victoryPanel) {
+            victoryPanel.active = false;
+        }
         if (gameOverPanel) {
             gameOverPanel.active = false;
         }

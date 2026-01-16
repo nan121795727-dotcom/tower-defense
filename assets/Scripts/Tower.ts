@@ -1,7 +1,7 @@
 import { _decorator, Component, Node, Vec3, find, Label, v3, Prefab, instantiate, Sprite, Color, UITransform, Graphics, resources, SpriteFrame, Texture2D } from 'cc';
 import { Bullet } from './Bullet';
 import { GameConfig } from './GameConfig';
-import { TowerData, TowerConfig, TowerRarity, SkillType } from './TowerType';
+import { TowerData, TowerConfig, TowerRarity, SkillType, MaxLevelBonus } from './TowerType';
 import { Enemy } from './Enemy';
 import { TouchManager } from './TouchManager';
 
@@ -126,13 +126,13 @@ export class Tower extends Component {
             
             console.log(`升级成功：${this.towerId} LV${oldLevel} -> LV${this.level}`);
             
-            // 升级属性增长
-            const baseDamage = this.towerData?.baseDamage || 5;
-            this.damage = Math.floor(baseDamage * (1 + (this.level - 1) * GameConfig.TOWER_DAMAGE_GROWTH_PER_LEVEL));
-            this.attackInterval = Math.max(
-                0.3,
-                (this.towerData?.baseAttackInterval || 1.2) - (this.level - 1) * 0.1
-            );
+            // 升级属性增长（基础增长）
+            this.applyLevelStats();
+            
+            // 满级特色强化
+            if (this.level >= this.MAX_LEVEL) {
+                this.applyMaxLevelBonus();
+            }
         } else {
             console.log(`合成成功但未升级：${this.towerId} LV${this.level} (${this.currentExp}/${this.nextLevelNeeded})`);
         }
@@ -146,10 +146,90 @@ export class Tower extends Component {
      * 检查是否可以吸收另一个塔
      */
     public canAbsorb(otherTower: Tower): boolean {
-        if (this.level >= this.MAX_LEVEL) return false;
-        if (otherTower.towerId !== this.towerId) return false;
-        if (otherTower.level !== 1) return false;
+        console.log(`[canAbsorb] 检查合成: 目标=${this.towerId} LV${this.level}, 源=${otherTower.towerId} LV${otherTower.level}`);
+        
+        if (this.level >= this.MAX_LEVEL) {
+            console.log(`[canAbsorb] 失败: 目标已满级 (MAX_LEVEL=${this.MAX_LEVEL})`);
+            return false;
+        }
+        if (otherTower.towerId !== this.towerId) {
+            console.log(`[canAbsorb] 失败: 类型不匹配`);
+            return false;
+        }
+        if (otherTower.level !== 1) {
+            console.log(`[canAbsorb] 失败: 源塔不是LV1 (源塔等级=${otherTower.level})`);
+            return false;
+        }
+        console.log(`[canAbsorb] 成功: 可以合成`);
         return true;
+    }
+
+    /**
+     * 应用等级属性（基础增长，每级都会调用）
+     */
+    private applyLevelStats() {
+        const baseDamage = this.towerData?.baseDamage || 5;
+        this.damage = Math.floor(baseDamage * (1 + (this.level - 1) * GameConfig.TOWER_DAMAGE_GROWTH_PER_LEVEL));
+        this.attackInterval = Math.max(
+            0.3,
+            (this.towerData?.baseAttackInterval || 1.2) - (this.level - 1) * 0.1
+        );
+        // 射程固定不变，避免玩家认知冲突
+    }
+
+    /**
+     * 应用满级特色强化（只在满级时调用）
+     * 
+     * 设计理念：每个塔满级时有独特的特征放大效果
+     * - 射手：攻速大幅提升 → 变成超高频射手
+     * - 法师：伤害大幅提升 → 变成高爆发法师
+     * - 战士：伤害翻倍 → 变成单体爆发王
+     * - 小炮：溅射范围扩大 → 真正的AOE炮台
+     * - 冰法：减速范围扩大 → 区域控制核心
+     * - 闪电塔：连锁数量翻倍 → 群体清场利器
+     */
+    private applyMaxLevelBonus() {
+        if (!this.towerData) return;
+        
+        const bonusType = this.towerData.maxLevelBonus;
+        const bonusValue = this.towerData.maxLevelBonusValue;
+        
+        switch (bonusType) {
+            case MaxLevelBonus.ATTACK_SPEED:
+                // 攻击间隔再减少（bonusValue是减少的百分比）
+                this.attackInterval = Math.max(0.2, this.attackInterval * (1 - bonusValue));
+                console.log(`[满级特效] ${this.towerData.name}: 攻速提升，攻击间隔=${this.attackInterval.toFixed(2)}s`);
+                break;
+                
+            case MaxLevelBonus.DAMAGE:
+                // 伤害额外增加（bonusValue是增加的百分比）
+                this.damage = Math.floor(this.damage * (1 + bonusValue));
+                console.log(`[满级特效] ${this.towerData.name}: 伤害提升，伤害=${this.damage}`);
+                break;
+                
+            case MaxLevelBonus.SLOW_RANGE:
+            case MaxLevelBonus.SPLASH_RANGE:
+            case MaxLevelBonus.CHAIN_COUNT:
+                // 这些效果在Bullet.ts中处理，这里只记录日志
+                console.log(`[满级特效] ${this.towerData.name}: 技能增强，bonusValue=${bonusValue}`);
+                break;
+        }
+    }
+
+    /**
+     * 获取满级特效数值（供Bullet使用）
+     */
+    public getMaxLevelBonusValue(): number {
+        if (this.level < this.MAX_LEVEL || !this.towerData) return 0;
+        return this.towerData.maxLevelBonusValue;
+    }
+
+    /**
+     * 获取满级特效类型（供Bullet使用）
+     */
+    public getMaxLevelBonusType(): MaxLevelBonus {
+        if (this.level < this.MAX_LEVEL || !this.towerData) return MaxLevelBonus.NONE;
+        return this.towerData.maxLevelBonus;
     }
 
     updateUI() {
@@ -276,17 +356,26 @@ export class Tower extends Component {
                 g.stroke();
             }
         } else {
-            // MAX等级：显示满格金色条
-            const maxWidth = 50;
-            // 填充
-            g.fillColor = new Color(255, 200, 50, 255);
-            g.rect(-maxWidth/2, barY - slotHeight/2, maxWidth, slotHeight);
-            g.fill();
-            // 边框（深灰色）
-            g.strokeColor = new Color(20, 20, 20, 255);
-            g.lineWidth = 1;
-            g.rect(-maxWidth/2, barY - slotHeight/2, maxWidth, slotHeight);
-            g.stroke();
+            // MAX等级：显示满格金色条（保持方格样式）
+            // 使用与升级进度相同的格子数量（最后一级需要的数量+1）
+            const maxSlots = 4;  // 满级显示4个金色格子
+            const totalWidth = maxSlots * slotWidth + (maxSlots - 1) * slotGap;
+            const startX = -totalWidth / 2;
+            
+            for (let i = 0; i < maxSlots; i++) {
+                const x = startX + i * (slotWidth + slotGap);
+                
+                // 金色填充
+                g.fillColor = new Color(255, 200, 50, 255);
+                g.rect(x, barY - slotHeight/2, slotWidth, slotHeight);
+                g.fill();
+                
+                // 格子边框（深灰色，细线）
+                g.strokeColor = new Color(20, 20, 20, 255);
+                g.lineWidth = 1;
+                g.rect(x, barY - slotHeight/2, slotWidth, slotHeight);
+                g.stroke();
+            }
         }
         
         // === 第三行：防御塔名称 ===
@@ -502,8 +591,11 @@ export class Tower extends Component {
             bulletScript.damage = finalDamage;
             // 传递技能信息给子弹（用于溅射、连锁等）
             if (this.towerData) {
-                (bulletScript as any).towerData = this.towerData;
-                (bulletScript as any).towerLevel = this.level;
+                bulletScript.towerData = this.towerData;
+                bulletScript.towerLevel = this.level;
+                // 传递满级特效信息
+                bulletScript.maxLevelBonusType = this.getMaxLevelBonusType();
+                bulletScript.maxLevelBonusValue = this.getMaxLevelBonusValue();
             }
         }
     }
@@ -709,6 +801,9 @@ export class Tower extends Component {
     /**
      * 根据Y坐标动态调整层级（Y值越小，越在下方，层级越高）
      * 与怪物使用相同的层级计算公式，确保防御塔和怪物之间也能正确遮挡
+     * 
+     * 重要：防御塔和怪物使用相同的层级范围（10-90），
+     * 必须低于商店面板（999）和TopBar（998）
      */
     private updateZIndexByPosition() {
         if (!this.node || !this.node.isValid) return;
@@ -725,13 +820,13 @@ export class Tower extends Component {
         }
         
         // Y坐标范围约 -400 到 400
-        // 映射到层级 200-399（高于怪物的20-199，但低于商店面板500）
-        // Y=-400（最下方）→ 层级399（最高）
-        // Y=400（最上方）→ 层级200（最低）
-        // 防御塔层级比怪物高，这样怪物不会遮挡防御塔
+        // 映射到层级 10-89（必须远低于商店面板999）
+        // Y=-400（最下方）→ 层级89（最高，显示在最前面）
+        // Y=400（最上方）→ 层级10（最低，显示在最后面）
+        // 防御塔和怪物使用相同公式，根据Y坐标决定谁在前面
         const yPos = this.node.position.y;
-        const zIndex = Math.floor(399 - (yPos + 400) * 199 / 800);
-        const clampedIndex = Math.max(200, Math.min(399, zIndex));
+        const zIndex = Math.floor(89 - (yPos + 400) * 79 / 800);
+        const clampedIndex = Math.max(10, Math.min(90, zIndex));
         
         if (this.node.getSiblingIndex() !== clampedIndex) {
             this.node.setSiblingIndex(clampedIndex);

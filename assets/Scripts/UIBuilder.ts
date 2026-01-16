@@ -55,15 +55,19 @@ export class UIBuilder extends Component {
         console.log("UIBuilder: 创建ShopPanel");
         this.createShopUI();
         
-        // 3. 创建游戏结束UI
+        // 3. 创建游戏结束UI（失败）
         console.log("UIBuilder: 创建GameOverPanel");
         this.createGameOverUI();
         
-        // 4. 创建取消区域（用于拖拽取消）
+        // 4. 创建胜利结算UI
+        console.log("UIBuilder: 创建VictoryPanel");
+        this.createVictoryUI();
+        
+        // 5. 创建取消区域（用于拖拽取消）
         console.log("UIBuilder: 创建CancelArea");
         this.createCancelArea();
         
-        // 5. 连接UI组件到控制器
+        // 6. 连接UI组件到控制器
         console.log("UIBuilder: 连接UI组件");
         this.connectUIComponents();
         
@@ -726,9 +730,227 @@ export class UIBuilder extends Component {
                 TouchManager.money = GameConfig.INITIAL_MONEY;
                 TouchManager.baseHealth = GameConfig.INITIAL_HEALTH;
                 TouchManager.isGameOver = false;
+                TouchManager.isVictory = false;
+                TouchManager.totalDamage = 0;
+                TouchManager.totalGoldEarned = 0;
+                TouchManager.gameStartTime = 0;
                 director.loadScene(director.getScene()!.name);
             }
         }, this);
+    }
+
+    /**
+     * 创建胜利结算UI
+     */
+    private createVictoryUI() {
+        const victoryPanel = new Node("VictoryPanel");
+        this.canvas.addChild(victoryPanel);
+        victoryPanel.active = false;
+        // 确保胜利面板在最顶层
+        victoryPanel.setSiblingIndex(99999);
+
+        const panelTransform = victoryPanel.addComponent(UITransform);
+        panelTransform.setContentSize(750, 1334);
+
+        const panelWidget = victoryPanel.addComponent(Widget);
+        panelWidget.isAlignTop = true;
+        panelWidget.isAlignBottom = true;
+        panelWidget.isAlignLeft = true;
+        panelWidget.isAlignRight = true;
+        panelWidget.top = 0;
+        panelWidget.bottom = 0;
+        panelWidget.left = 0;
+        panelWidget.right = 0;
+        panelWidget.alignMode = Widget.AlignMode.ALWAYS;
+
+        // === 全屏黑色半透明遮罩 ===
+        const mask = new Node("Mask");
+        victoryPanel.addChild(mask);
+        const maskTransform = mask.addComponent(UITransform);
+        maskTransform.setContentSize(750, 1334);
+        const maskWidget = mask.addComponent(Widget);
+        maskWidget.isAlignTop = true;
+        maskWidget.isAlignBottom = true;
+        maskWidget.isAlignLeft = true;
+        maskWidget.isAlignRight = true;
+        maskWidget.top = 0;
+        maskWidget.bottom = 0;
+        maskWidget.left = 0;
+        maskWidget.right = 0;
+        maskWidget.alignMode = Widget.AlignMode.ALWAYS;
+        const maskGraphics = mask.addComponent(Graphics);
+        maskGraphics.fillColor = new Color(0, 0, 0, 200);
+        maskGraphics.rect(-375, -667, 750, 1334);
+        maskGraphics.fill();
+
+        // === 中央横幅底板（更大以容纳更多信息）===
+        const banner = new Node("Banner");
+        victoryPanel.addChild(banner);
+        const bannerTransform = banner.addComponent(UITransform);
+        bannerTransform.setContentSize(450, 320);
+        banner.setPosition(v3(0, 30, 0));
+        
+        // 横幅背景（深色带金边）
+        const bannerGraphics = banner.addComponent(Graphics);
+        // 主背景
+        bannerGraphics.fillColor = new Color(20, 30, 45, 250);
+        bannerGraphics.roundRect(-225, -160, 450, 320, 12);
+        bannerGraphics.fill();
+        // 金色边框
+        bannerGraphics.strokeColor = new Color(255, 215, 0, 255);
+        bannerGraphics.lineWidth = 3;
+        bannerGraphics.roundRect(-225, -160, 450, 320, 12);
+        bannerGraphics.stroke();
+        // 内部高亮边
+        bannerGraphics.strokeColor = new Color(255, 240, 180, 50);
+        bannerGraphics.lineWidth = 1;
+        bannerGraphics.roundRect(-221, -156, 442, 312, 10);
+        bannerGraphics.stroke();
+
+        // === 通关成功文本 ===
+        const victoryText = new Node("VictoryText");
+        banner.addChild(victoryText);
+        victoryText.setPosition(v3(0, 115, 0));
+        const victoryTextTransform = victoryText.addComponent(UITransform);
+        victoryTextTransform.setContentSize(400, 60);
+        const victoryLabel = victoryText.addComponent(Label);
+        victoryLabel.string = "🏆 通关成功！";
+        victoryLabel.fontSize = 38;
+        victoryLabel.color = new Color(255, 215, 0);
+        victoryLabel.horizontalAlign = Label.HorizontalAlign.CENTER;
+        victoryLabel.verticalAlign = Label.VerticalAlign.CENTER;
+        victoryLabel.enableOutline = true;
+        victoryLabel.outlineColor = new Color(100, 70, 0, 200);
+        victoryLabel.outlineWidth = 2;
+
+        // === 统计信息区域 ===
+        const statsArea = new Node("StatsArea");
+        banner.addChild(statsArea);
+        statsArea.setPosition(v3(0, 20, 0));
+
+        // 通关用时
+        const timeRow = this.createStatRow("TimeRow", "⏱️ 通关用时", "00:00", 0, 45);
+        statsArea.addChild(timeRow);
+
+        // 赚取金币
+        const goldRow = this.createStatRow("GoldRow", "💰 赚取金币", "0", 0, 5);
+        statsArea.addChild(goldRow);
+
+        // 总伤害
+        const damageRow = this.createStatRow("DamageRow", "⚔️ 总伤害", "0", 0, -35);
+        statsArea.addChild(damageRow);
+
+        // === 重新挑战按钮 ===
+        const resetButton = new Node("ResetButton");
+        banner.addChild(resetButton);
+        resetButton.setPosition(v3(0, -115, 0));
+        const btnTransform = resetButton.addComponent(UITransform);
+        btnTransform.setContentSize(180, 50);
+        
+        // 按钮背景（金色调）
+        const btnGraphics = resetButton.addComponent(Graphics);
+        btnGraphics.fillColor = new Color(180, 140, 50, 255);
+        btnGraphics.roundRect(-90, -25, 180, 50, 8);
+        btnGraphics.fill();
+        // 边框
+        btnGraphics.strokeColor = new Color(255, 215, 0, 255);
+        btnGraphics.lineWidth = 2;
+        btnGraphics.roundRect(-90, -25, 180, 50, 8);
+        btnGraphics.stroke();
+        
+        // 按钮文本
+        const btnLabel = new Node("Label");
+        resetButton.addChild(btnLabel);
+        const btnLabelTransform = btnLabel.addComponent(UITransform);
+        btnLabelTransform.setContentSize(180, 50);
+        const label = btnLabel.addComponent(Label);
+        label.string = "🔄 重新挑战";
+        label.fontSize = 22;
+        label.color = new Color(255, 255, 255);
+        label.horizontalAlign = Label.HorizontalAlign.CENTER;
+        label.verticalAlign = Label.VerticalAlign.CENTER;
+        label.enableOutline = true;
+        label.outlineColor = new Color(80, 60, 20, 200);
+        label.outlineWidth = 1;
+
+        // 添加按钮组件
+        const button = resetButton.addComponent(Button);
+        button.transition = Button.Transition.SCALE;
+        button.zoomScale = 1.1;
+        
+        // 绑定点击事件
+        button.node.on(Button.EventType.CLICK, () => {
+            let uiController = this.canvas.getComponentInChildren(UIController);
+            
+            if (!uiController) {
+                const allNodes: Node[] = [];
+                const collectNodes = (node: Node) => {
+                    allNodes.push(node);
+                    node.children.forEach(child => collectNodes(child));
+                };
+                collectNodes(this.canvas);
+                for (const node of allNodes) {
+                    const uc = node.getComponent(UIController);
+                    if (uc) {
+                        uiController = uc;
+                        break;
+                    }
+                }
+            }
+            
+            if (uiController) {
+                uiController.onResetButtonClick();
+            } else {
+                console.warn("UIController未找到，直接重新加载场景");
+                TouchManager.money = GameConfig.INITIAL_MONEY;
+                TouchManager.baseHealth = GameConfig.INITIAL_HEALTH;
+                TouchManager.isGameOver = false;
+                TouchManager.isVictory = false;
+                TouchManager.totalDamage = 0;
+                TouchManager.totalGoldEarned = 0;
+                TouchManager.gameStartTime = 0;
+                director.loadScene(director.getScene()!.name);
+            }
+        }, this);
+    }
+
+    /**
+     * 创建统计行
+     */
+    private createStatRow(name: string, labelText: string, valueText: string, x: number, y: number): Node {
+        const row = new Node(name);
+        row.setPosition(v3(x, y, 0));
+        
+        // 标签
+        const labelNode = new Node("Label");
+        row.addChild(labelNode);
+        labelNode.setPosition(v3(-80, 0, 0));
+        const labelTransform = labelNode.addComponent(UITransform);
+        labelTransform.setContentSize(150, 30);
+        const label = labelNode.addComponent(Label);
+        label.string = labelText;
+        label.fontSize = 18;
+        label.color = new Color(200, 200, 210);
+        label.horizontalAlign = Label.HorizontalAlign.LEFT;
+        label.verticalAlign = Label.VerticalAlign.CENTER;
+        
+        // 数值
+        const valueNode = new Node("Value");
+        row.addChild(valueNode);
+        valueNode.setPosition(v3(80, 0, 0));
+        const valueTransform = valueNode.addComponent(UITransform);
+        valueTransform.setContentSize(150, 30);
+        const valueLabel = valueNode.addComponent(Label);
+        valueLabel.string = valueText;
+        valueLabel.fontSize = 20;
+        valueLabel.color = new Color(255, 235, 150);
+        valueLabel.horizontalAlign = Label.HorizontalAlign.RIGHT;
+        valueLabel.verticalAlign = Label.VerticalAlign.CENTER;
+        valueLabel.enableOutline = true;
+        valueLabel.outlineColor = new Color(50, 40, 0, 150);
+        valueLabel.outlineWidth = 1;
+        
+        return row;
     }
 
     /**
