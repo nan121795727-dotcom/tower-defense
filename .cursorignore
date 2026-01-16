@@ -1,0 +1,15 @@
+# 忽略二进制资源
+Content/
+Saved/
+Intermediate/
+Binaries/
+Build/
+DerivedDataCache/
+
+# 忽略美术原始文件
+*.uasset
+*.umap
+*.png
+*.jpg
+*.psd
+*.fbx

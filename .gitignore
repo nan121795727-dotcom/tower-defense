@@ -1,0 +1,8 @@
+# Cocos Creator 忽略列表
+library/
+temp/
+local/
+build/
+profiles/
+native/
+*.meta
